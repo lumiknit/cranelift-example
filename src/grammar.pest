@@ -1,0 +1,30 @@
+root = { SOI ~ expr ~ EOI }
+
+// Expr
+expr = _{ calc | term }
+
+paren = _{ "(" ~ expr ~ ")" }
+
+// This is slightly dumb, because all operator have the same precedence,
+// I just use it for simplicity
+calc = { term ~ infix ~ expr }
+
+term = _{ num | paren | input }
+
+// Operator for calculation
+infix = _{ add | sub | mul | div | eq }
+add = { "+" }
+sub = { "-" }
+mul = { "*" }
+div = { "/" }
+eq = { "==" }
+
+// Number in just an integer
+num = @{ ("+" | "-")? ~ ('0'..'9')+ }
+
+// Input looks like '$0', '$1', '$2', ...
+input = @{ "$" ~ input_index }
+input_index = { ('0'..'9')+ }
+
+WHITESPACE = _{ " " | "\n" | "\t" | "\r" }
+COMMENT = _{ "//" ~ (!"\n" ~ ANY)* ~ "\n"? }
