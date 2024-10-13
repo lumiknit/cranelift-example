@@ -64,7 +64,7 @@ pub fn parse_expr(input: &str) -> Result<Expr, String> {
     let result = Grammar::parse(Rule::root, input).map_err(|e| e.to_string())?;
 
     // Then, convert the pest parse tree into Expr
-    let mut expr = convert_rule_to_expr(result.into_iter().next().unwrap())?;
+    let expr = convert_rule_to_expr(result.into_iter().next().unwrap())?;
 
     // Finally, return the result
     Ok(expr)

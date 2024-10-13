@@ -1,28 +1,28 @@
 use cranelift::{
-    codegen::{
-        control::ControlPlane,
-        ir::{types, AbiParam, Function, Signature, UserFuncName},
-        isa::{self, CallConv},
-        Context,
-    },
-    prelude::{settings, Block, InstBuilder, IntCC, Value},
+    codegen::ir::{types, AbiParam, Function, UserFuncName},
+    prelude::{Block, InstBuilder, IntCC, Value},
 };
 use cranelift_frontend::{FunctionBuilder, FunctionBuilderContext};
-use target_lexicon::Triple;
+use cranelift_jit::{JITBuilder, JITModule};
+use cranelift_module::{FuncId, Linkage, Module};
 
-use crate::expr::{BinOp, Expr};
+use crate::{
+    expr::{BinOp, Expr},
+    runtime,
+};
+
+type FuncMap = std::collections::HashMap<String, FuncId>;
 
 /// Compiled object buffer, which takes 4 i32 arguments and returns an i32 value
 pub struct Fn4I32ToI32 {
-    buf: memmap2::Mmap,
+    buf: *const u8,
 }
 
 impl Fn4I32ToI32 {
     /// Invoke the function with the given arguments
     pub fn call(&self, a: i32, b: i32, c: i32, d: i32) -> i32 {
         unsafe {
-            let func: unsafe extern "sysv64" fn(i32, i32, i32, i32) -> i32 =
-                std::mem::transmute(self.buf.as_ptr());
+            let func: unsafe fn(i32, i32, i32, i32) -> i32 = std::mem::transmute(self.buf);
             func(a, b, c, d)
         }
     }
@@ -54,67 +54,66 @@ fn build_each_expr(expr: &Expr, builder: &mut FunctionBuilder, block: &Block) ->
 
 fn build_with_expr(expr: &Expr, builder: &mut FunctionBuilder) {
     let block = builder.create_block();
-    builder.seal_block(block);
     builder.append_block_params_for_function_params(block);
-
     builder.switch_to_block(block);
+    builder.seal_block(block);
 
     let result = build_each_expr(expr, builder, &block);
 
     builder.ins().return_(&[result]);
 }
 
+fn declare_runtime_functions(module: &mut JITModule) -> FuncMap {
+    let mut func_map = FuncMap::new();
+
+    {
+        // Print
+        let mut print_sig = module.make_signature();
+        print_sig.params.push(AbiParam::new(types::I32));
+        print_sig.returns.push(AbiParam::new(types::I32));
+        let id = module
+            .declare_function("print", Linkage::Local, &print_sig)
+            .unwrap();
+        func_map.insert("print".to_string(), id);
+    }
+
+    func_map
+}
+
 /// Compile the expression into a single function with cranelift
 pub fn compile_expr(expr: &Expr) -> Result<Fn4I32ToI32, String> {
-    let mut sig = Signature::new(CallConv::SystemV);
+    let mut builder = JITBuilder::new(cranelift_module::default_libcall_names()).unwrap();
+    builder.symbol("print", runtime::print as *const u8);
+    let mut module = cranelift_jit::JITModule::new(builder);
 
-    // Add 4 i32 arguments
+    let func_map = declare_runtime_functions(&mut module);
+
+    // Compile main function
+    let mut ctx = module.make_context();
     for _ in 0..4 {
-        sig.params.push(AbiParam::new(types::I32));
+        ctx.func.signature.params.push(AbiParam::new(types::I32));
     }
-
-    // Return an i32 value
-    sig.returns.push(AbiParam::new(types::I32));
+    ctx.func.signature.returns.push(AbiParam::new(types::I32));
+    ctx.func.name = UserFuncName::default();
 
     // Create a new function
-    let name = UserFuncName::default();
-    let mut func = Function::with_name_signature(name, sig);
+    let mut func_ctx = FunctionBuilderContext::new();
 
     // Create a context and builder
-    let mut ctx = FunctionBuilderContext::new();
-    let mut builder = FunctionBuilder::new(&mut func, &mut ctx);
 
-    // Create a new block
+    let mut builder = FunctionBuilder::new(&mut ctx.func, &mut func_ctx);
     build_with_expr(expr, &mut builder);
-
-    // Finalize the builder
     builder.finalize();
 
-    // Set-up ISA
-    let builder = settings::builder();
-    let isa = settings::Flags::new(builder);
-
-    let isa = match isa::lookup(Triple::host()) {
-        Err(e) => return Err(format!("Failed to look up host triple: {}", e)),
-        Ok(isa_builder) => isa_builder.finish(isa),
-    }
-    .unwrap();
-
-    // Compile
-    let mut ctx = Context::for_function(func);
-    let mut ctrl_plane = ControlPlane::default();
-    let code = ctx.compile(&*isa, &mut ctrl_plane).unwrap();
-
-    // Create a memory map
-    let mut buf = memmap2::MmapOptions::new()
-        .len(code.code_buffer().len())
-        .map_anon()
+    let main_fn = module
+        .declare_function("main", Linkage::Local, &ctx.func.signature)
         .unwrap();
-    buf.copy_from_slice(code.code_buffer());
+    module.define_function(main_fn, &mut ctx).unwrap();
+    module.clear_context(&mut ctx);
 
-    let buffer = Fn4I32ToI32 {
-        buf: buf.make_exec().unwrap(),
-    };
+    module.finalize_definitions().unwrap();
 
-    Ok(buffer)
+    let code = module.get_finalized_function(main_fn);
+
+    Ok(Fn4I32ToI32 { buf: code })
 }

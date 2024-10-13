@@ -1,5 +1,6 @@
 pub mod compiler;
 pub mod expr;
+pub mod runtime;
 
 fn main() {
     // Read the first argument, the file name
