@@ -1,13 +1,18 @@
 root = { SOI ~ expr ~ EOI }
 
 // Expr
-expr = _{ calc | term }
+expr = _{ calc | call | term }
 
 paren = _{ "(" ~ expr ~ ")" }
 
 // This is slightly dumb, because all operator have the same precedence,
 // I just use it for simplicity
 calc = { term ~ infix ~ expr }
+
+call = { fn ~ expr }
+
+fn = _{ fn_print }
+fn_print = { "print" | "rand" }
 
 term = _{ num | paren | input }
 
