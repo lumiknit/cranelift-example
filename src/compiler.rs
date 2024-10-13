@@ -28,7 +28,12 @@ impl Fn4I32ToI32 {
     }
 }
 
-fn build_each_expr(
+/// Insert the expression into the block
+/// Since current language has no branch/blocks, this simple function is enough
+/// to translate the expression into cranelift IR.
+/// However, if you want to support more complex language, you may need to
+/// implement more precise state management.
+fn insert_expr_to_block(
     expr: &Expr,
     builder: &mut FunctionBuilder,
     block: &Block,
@@ -43,8 +48,8 @@ fn build_each_expr(
             builder.block_params(*block)[*i as usize]
         }
         Expr::BinOp(op, lhs, rhs) => {
-            let lhs = build_each_expr(lhs, builder, block, func_map);
-            let rhs = build_each_expr(rhs, builder, block, func_map);
+            let lhs = insert_expr_to_block(lhs, builder, block, func_map);
+            let rhs = insert_expr_to_block(rhs, builder, block, func_map);
             match op {
                 BinOp::Add => builder.ins().iadd(lhs, rhs),
                 BinOp::Sub => builder.ins().isub(lhs, rhs),
@@ -54,25 +59,28 @@ fn build_each_expr(
             }
         }
         Expr::Call(func, arg) => {
-            let a = build_each_expr(arg, builder, block, func_map);
+            // For function call, find the symbol first.
             let r = func_map.get(func.to_string()).unwrap();
+            let a = insert_expr_to_block(arg, builder, block, func_map);
             let call = builder.ins().call(*r, &[a]);
             builder.inst_results(call)[0]
         }
     }
 }
 
-fn build_with_expr(expr: &Expr, builder: &mut FunctionBuilder, func_map: &FuncMap) {
+/// Build the function with the given expression
+fn build_function_with_expr(expr: &Expr, builder: &mut FunctionBuilder, func_map: &FuncMap) {
     let block = builder.create_block();
     builder.append_block_params_for_function_params(block);
     builder.switch_to_block(block);
     builder.seal_block(block);
 
-    let result = build_each_expr(expr, builder, &block, func_map);
+    let result = insert_expr_to_block(expr, builder, &block, func_map);
 
     builder.ins().return_(&[result]);
 }
 
+/// Declare runtime functions into the given module.
 fn declare_runtime_functions(module: &mut JITModule, func: &mut Function) -> FuncMap {
     let mut func_map = FuncMap::new();
 
@@ -105,12 +113,16 @@ fn declare_runtime_functions(module: &mut JITModule, func: &mut Function) -> Fun
 
 /// Compile the expression into a single function with cranelift
 pub fn compile_expr(expr: &Expr) -> Result<Fn4I32ToI32, String> {
+    // Create JITBuilder and push some runtime functions as symbol
     let mut builder = JITBuilder::new(cranelift_module::default_libcall_names()).unwrap();
     builder.symbol("print", runtime::print as *const u8);
     builder.symbol("rand", runtime::rand as *const u8);
+
+    // Create JIT Module
     let mut module = JITModule::new(builder);
 
-    // Compile main function
+    // Now, start to compile the main program.
+    // Create a context and set-up function signature
     let mut ctx = module.make_context();
     for _ in 0..4 {
         ctx.func.signature.params.push(AbiParam::new(types::I32));
@@ -118,27 +130,30 @@ pub fn compile_expr(expr: &Expr) -> Result<Fn4I32ToI32, String> {
     ctx.func.signature.returns.push(AbiParam::new(types::I32));
     ctx.func.name = UserFuncName::default();
 
-    // Create a new function
+    // Create a function context
     let mut func_ctx = FunctionBuilderContext::new();
 
-    // Create a context and builder
+    // Before building the function, declare runtime functions
     let func_map = declare_runtime_functions(&mut module, &mut ctx.func);
 
+    // Build the function
     let mut builder = FunctionBuilder::new(&mut ctx.func, &mut func_ctx);
-    build_with_expr(expr, &mut builder, &func_map);
+    build_function_with_expr(expr, &mut builder, &func_map);
     builder.finalize();
 
+    // Declare and define the main function into the module
     let main_fn = module
         .declare_function("main", Linkage::Local, &ctx.func.signature)
         .unwrap();
     module.define_function(main_fn, &mut ctx).unwrap();
     module.clear_context(&mut ctx);
 
+    // Finalize the definitions
     module
         .finalize_definitions()
         .expect("Failed to finalize definitions");
 
+    // Get the final code
     let code = module.get_finalized_function(main_fn);
-
     Ok(Fn4I32ToI32 { buf: code })
 }

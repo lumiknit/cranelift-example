@@ -1,19 +1,24 @@
+// Root rule is just a singleton of the expression
+// EOI is required to consume whole input.
 root = { SOI ~ expr ~ EOI }
 
 // Expr
 expr = _{ calc | call | term }
 
+// Expression enclosed in parentheses
 paren = _{ "(" ~ expr ~ ")" }
 
+// Infix operator
 // This is slightly dumb, because all operator have the same precedence,
 // I just use it for simplicity
 calc = { term ~ infix ~ expr }
 
+// Function call
 call = { fn ~ expr }
-
 fn = _{ fn_print }
 fn_print = { "print" | "rand" }
 
+// Term is almost same as expr, but prevent infinite recursion because of calc.
 term = _{ num | paren | input }
 
 // Operator for calculation
@@ -31,5 +36,6 @@ num = @{ ("+" | "-")? ~ ('0'..'9')+ }
 input = @{ "$" ~ input_index }
 input_index = { ('0'..'9')+ }
 
+// Other rules.
 WHITESPACE = _{ " " | "\n" | "\t" | "\r" }
 COMMENT = _{ "//" ~ (!"\n" ~ ANY)* ~ "\n"? }

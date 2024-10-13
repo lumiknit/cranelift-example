@@ -1,3 +1,5 @@
+//! This module contains some built-in functions that can be used in the language.
+
 use rand::Rng;
 
 /// Print a value and return without modifying it

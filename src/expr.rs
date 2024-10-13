@@ -1,3 +1,8 @@
+//! Expression and Parser
+//! This module defines the expression structure.
+//! Also, it provides a parser based on pest library.
+//! See `src/grammar.pest` for the grammar definition.
+
 use pest::Parser;
 use pest_derive::Parser;
 
@@ -27,17 +32,21 @@ impl BinOp {
     }
 
     pub fn from_string(op: &str) -> Option<Self> {
-        match op {
-            "+" => Some(BinOp::Add),
-            "-" => Some(BinOp::Sub),
-            "*" => Some(BinOp::Mul),
-            "/" => Some(BinOp::Div),
-            "==" => Some(BinOp::Eq),
-            _ => None,
-        }
+        Some(match op {
+            "+" => BinOp::Add,
+            "-" => BinOp::Sub,
+            "*" => BinOp::Mul,
+            "/" => BinOp::Div,
+            "==" => BinOp::Eq,
+            _ => return None,
+        })
     }
 }
 
+/// Built-in functions
+/// Here we only declares the function names.
+/// The implementations are defined in `src/runtime.rs`,
+/// and the mapping is done in `src/compiler.rs`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum BuiltInFunc {
     Print,
@@ -53,11 +62,11 @@ impl BuiltInFunc {
     }
 
     pub fn from_string(name: &str) -> Option<Self> {
-        match name {
-            "print" => Some(BuiltInFunc::Print),
-            "rand" => Some(BuiltInFunc::Rand),
-            _ => None,
-        }
+        Some(match name {
+            "print" => BuiltInFunc::Print,
+            "rand" => BuiltInFunc::Rand,
+            _ => return None,
+        })
     }
 }
 
@@ -70,7 +79,9 @@ pub enum Expr {
     Call(BuiltInFunc, Box<Expr>),
 }
 
+/// Convert the pest parse tree into Expr
 fn convert_rule_to_expr(rule: pest::iterators::Pair<Rule>) -> Result<Expr, String> {
+    // Just recursively convert the parse tree into Expr
     match rule.as_rule() {
         Rule::root => convert_rule_to_expr(rule.into_inner().next().unwrap()),
         Rule::num => {
@@ -107,12 +118,7 @@ fn convert_rule_to_expr(rule: pest::iterators::Pair<Rule>) -> Result<Expr, Strin
 
 /// Parse the input string into Expr
 pub fn parse_expr(input: &str) -> Result<Expr, String> {
-    // First, use pest to parse the input string
     let result = Grammar::parse(Rule::root, input).map_err(|e| e.to_string())?;
-
-    // Then, convert the pest parse tree into Expr
     let expr = convert_rule_to_expr(result.into_iter().next().unwrap())?;
-
-    // Finally, return the result
     Ok(expr)
 }

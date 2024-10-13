@@ -1,25 +1,31 @@
+//! The main file of cranelift example.
+
 pub mod compiler;
 pub mod expr;
 pub mod runtime;
 
 fn main() {
-    // Read the first argument, the file name
+    // Usage: cranelift-expr <source file name>
+    // Read source file whose name is passed as argument
+
     let filename = std::env::args()
         .nth(1)
         .expect("Usage: cranelift-expr <filename>");
 
-    // Read the file content
     let content = std::fs::read_to_string(&filename).expect("Failed to read the file");
 
-    // Parse the content into Expr
-    let expr = expr::parse_expr(content.as_str()).expect("Failed to parse the expression");
+    // Parse the file content into an expressions
 
+    let expr = expr::parse_expr(content.as_str()).expect("Failed to parse the expression");
     println!("Parsed expression: {:?}", expr);
 
-    // Compile the expression
+    // Compile the expression into a function using compiler
+
     let func = compiler::compile_expr(&expr).expect("Failed to compile the expression");
 
-    // Take inputs from command line
+    // The program will takes 4 numbers as input.
+    // Read a line from stdin and split it into 4 numbers.
+
     let mut buf = String::new();
     println!("Enter 4 numbers: ");
     std::io::stdin()
@@ -35,7 +41,8 @@ fn main() {
         inputs.push(0);
     }
 
-    // Call the function
+    // Call the compiled function.
+
     let result = func.call(inputs[0], inputs[1], inputs[2], inputs[3]);
     println!("Result: {}", result);
 }
